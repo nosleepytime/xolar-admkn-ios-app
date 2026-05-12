@@ -1,0 +1,73 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build iPhoneOS app without signing
+        run: |
+          xcodebuild clean build \
+            -project "XolarAdmin.xcodeproj" \
+            -scheme "XolarAdmin" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$PWD/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            VALIDATE_WORKSPACE=NO
+
+      - name: Create unsigned IPA
+        run: |
+          rm -rf build
+          mkdir -p build/Payload
+
+          APP_PATH="$PWD/DerivedData/Build/Products/Release-iphoneos/XolarAdmin.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "XolarAdmin.app not found"
+            find "$PWD/DerivedData" -name "*.app" -type d
+            exit 1
+          fi
+
+          echo "Found app:"
+          ls -la "$APP_PATH"
+
+          echo "Checking executable:"
+          ls -lh "$APP_PATH/XolarAdmin" || true
+
+          cp -R "$APP_PATH" build/Payload/XolarAdmin.app
+
+          cd build
+          /usr/bin/zip -qry XolarAdmin-unsigned.ipa Payload
+
+          echo "IPA size:"
+          ls -lh XolarAdmin-unsigned.ipa
+
+          echo "IPA content:"
+          unzip -l XolarAdmin-unsigned.ipa | head -100
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: XolarAdmin-unsigned-IPA
+          path: build/XolarAdmin-unsigned.ipa
