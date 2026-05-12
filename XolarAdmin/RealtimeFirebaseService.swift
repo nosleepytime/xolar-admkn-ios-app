@@ -2,7 +2,6 @@ import Foundation
 import FirebaseAuth
 import FirebaseDatabase
 
-@MainActor
 final class RealtimeFirebaseService {
     private var ticketsHandle: DatabaseHandle?
     private var agentsHandle: DatabaseHandle?
@@ -54,8 +53,8 @@ final class RealtimeFirebaseService {
     }
 
     func observeTickets(onChange: @escaping ([Ticket]) -> Void) {
-        if let ticketsHandle {
-            db.child("tickets").removeObserver(withHandle: ticketsHandle)
+        if let handle = ticketsHandle {
+            db.child("tickets").removeObserver(withHandle: handle)
         }
 
         ticketsHandle = db.child("tickets").observe(.value) { snapshot in
@@ -63,12 +62,14 @@ final class RealtimeFirebaseService {
 
             for child in snapshot.children {
                 guard let childSnapshot = child as? DataSnapshot else { continue }
-                guard let payload = Self.decodeSnapshot(childSnapshot, as: TicketPayload.self) else { continue }
+                guard let payload = RealtimeFirebaseService.decodeSnapshot(childSnapshot, as: TicketPayload.self) else { continue }
 
                 tickets.append(Ticket(id: childSnapshot.key, payload: payload))
             }
 
-            tickets.sort { $0.updatedAt.normalizedTimestamp > $1.updatedAt.normalizedTimestamp }
+            tickets.sort {
+                $0.updatedAt.normalizedTimestamp > $1.updatedAt.normalizedTimestamp
+            }
 
             DispatchQueue.main.async {
                 onChange(tickets)
@@ -77,8 +78,8 @@ final class RealtimeFirebaseService {
     }
 
     func observeAgents(onChange: @escaping ([Agent]) -> Void) {
-        if let agentsHandle {
-            db.child("agents").removeObserver(withHandle: agentsHandle)
+        if let handle = agentsHandle {
+            db.child("agents").removeObserver(withHandle: handle)
         }
 
         agentsHandle = db.child("agents").observe(.value) { snapshot in
@@ -86,13 +87,15 @@ final class RealtimeFirebaseService {
 
             for child in snapshot.children {
                 guard let childSnapshot = child as? DataSnapshot else { continue }
-                guard let payload = Self.decodeSnapshot(childSnapshot, as: AgentPayload.self) else { continue }
+                guard let payload = RealtimeFirebaseService.decodeSnapshot(childSnapshot, as: AgentPayload.self) else { continue }
                 guard payload.enabled != false else { continue }
 
                 agents.append(Agent(id: childSnapshot.key, payload: payload))
             }
 
-            agents.sort { $0.username.lowercased() < $1.username.lowercased() }
+            agents.sort {
+                $0.username.lowercased() < $1.username.lowercased()
+            }
 
             DispatchQueue.main.async {
                 onChange(agents)
@@ -101,8 +104,8 @@ final class RealtimeFirebaseService {
     }
 
     func observeNotifications(uid: String, onChange: @escaping ([AgentNotification]) -> Void) {
-        if let notificationsHandle {
-            db.child("agentNotifications").child(uid).removeObserver(withHandle: notificationsHandle)
+        if let handle = notificationsHandle {
+            db.child("agentNotifications").child(uid).removeObserver(withHandle: handle)
         }
 
         notificationsHandle = db.child("agentNotifications").child(uid).observe(.value) { snapshot in
@@ -110,14 +113,16 @@ final class RealtimeFirebaseService {
 
             for child in snapshot.children {
                 guard let childSnapshot = child as? DataSnapshot else { continue }
-                guard let payload = Self.decodeSnapshot(childSnapshot, as: AgentNotificationPayload.self) else { continue }
+                guard let payload = RealtimeFirebaseService.decodeSnapshot(childSnapshot, as: AgentNotificationPayload.self) else { continue }
                 guard payload.read != true else { continue }
                 guard !(payload.ticketId ?? "").isEmpty else { continue }
 
                 notifications.append(AgentNotification(id: childSnapshot.key, payload: payload))
             }
 
-            notifications.sort { $0.createdAt.normalizedTimestamp > $1.createdAt.normalizedTimestamp }
+            notifications.sort {
+                $0.createdAt.normalizedTimestamp > $1.createdAt.normalizedTimestamp
+            }
 
             DispatchQueue.main.async {
                 onChange(notifications)
@@ -133,58 +138,62 @@ final class RealtimeFirebaseService {
         latestLegacyMessages = []
 
         appMessagesHandle = db.child("tickets").child(ticketId).child("messages").observe(.value) { [weak self] snapshot in
-            guard let self else { return }
+            guard let self = self else { return }
 
             var messages: [TicketMessage] = []
 
             for child in snapshot.children {
                 guard let childSnapshot = child as? DataSnapshot else { continue }
-                guard let payload = Self.decodeSnapshot(childSnapshot, as: TicketMessagePayload.self) else { continue }
+                guard let payload = RealtimeFirebaseService.decodeSnapshot(childSnapshot, as: TicketMessagePayload.self) else { continue }
 
                 messages.append(TicketMessage(id: childSnapshot.key, payload: payload))
             }
 
-            Task { @MainActor in
-                self.latestAppMessages = messages
-                onChange(self.combinedMessages())
+            self.latestAppMessages = messages
+            let combined = self.combinedMessages()
+
+            DispatchQueue.main.async {
+                onChange(combined)
             }
         }
 
         legacyMessagesHandle = db.child("ticketMessages").child(ticketId).observe(.value) { [weak self] snapshot in
-            guard let self else { return }
+            guard let self = self else { return }
 
             var messages: [TicketMessage] = []
 
             for child in snapshot.children {
                 guard let childSnapshot = child as? DataSnapshot else { continue }
-                guard let payload = Self.decodeSnapshot(childSnapshot, as: LegacyTicketMessagePayload.self) else { continue }
+                guard let payload = RealtimeFirebaseService.decodeSnapshot(childSnapshot, as: LegacyTicketMessagePayload.self) else { continue }
 
                 messages.append(TicketMessage(id: childSnapshot.key, legacy: payload))
             }
 
-            Task { @MainActor in
-                self.latestLegacyMessages = messages
-                onChange(self.combinedMessages())
+            self.latestLegacyMessages = messages
+            let combined = self.combinedMessages()
+
+            DispatchQueue.main.async {
+                onChange(combined)
             }
         }
     }
 
     func detachMessages() {
-        guard let activeTicketId else { return }
+        guard let ticketId = activeTicketId else { return }
 
-        if let appMessagesHandle {
-            db.child("tickets").child(activeTicketId).child("messages").removeObserver(withHandle: appMessagesHandle)
+        if let handle = appMessagesHandle {
+            db.child("tickets").child(ticketId).child("messages").removeObserver(withHandle: handle)
         }
 
-        if let legacyMessagesHandle {
-            db.child("ticketMessages").child(activeTicketId).removeObserver(withHandle: legacyMessagesHandle)
+        if let handle = legacyMessagesHandle {
+            db.child("ticketMessages").child(ticketId).removeObserver(withHandle: handle)
         }
 
-        self.activeTicketId = nil
-        self.appMessagesHandle = nil
-        self.legacyMessagesHandle = nil
-        self.latestAppMessages = []
-        self.latestLegacyMessages = []
+        activeTicketId = nil
+        appMessagesHandle = nil
+        legacyMessagesHandle = nil
+        latestAppMessages = []
+        latestLegacyMessages = []
     }
 
     func markNotificationRead(uid: String, notificationId: String) {
@@ -192,7 +201,7 @@ final class RealtimeFirebaseService {
     }
 
     func saveFCMToken(uid: String, token: String) {
-        let key = Self.safeFirebaseKey(token)
+        let key = RealtimeFirebaseService.safeFirebaseKey(token)
 
         db.child("agents")
             .child(uid)
@@ -206,16 +215,16 @@ final class RealtimeFirebaseService {
     }
 
     func detachAll() {
-        if let ticketsHandle {
-            db.child("tickets").removeObserver(withHandle: ticketsHandle)
+        if let handle = ticketsHandle {
+            db.child("tickets").removeObserver(withHandle: handle)
         }
 
-        if let agentsHandle {
-            db.child("agents").removeObserver(withHandle: agentsHandle)
+        if let handle = agentsHandle {
+            db.child("agents").removeObserver(withHandle: handle)
         }
 
-        if let sessionUid = Auth.auth().currentUser?.uid, let notificationsHandle {
-            db.child("agentNotifications").child(sessionUid).removeObserver(withHandle: notificationsHandle)
+        if let uid = Auth.auth().currentUser?.uid, let handle = notificationsHandle {
+            db.child("agentNotifications").child(uid).removeObserver(withHandle: handle)
         }
 
         detachMessages()
@@ -227,7 +236,6 @@ final class RealtimeFirebaseService {
 
     private func combinedMessages() -> [TicketMessage] {
         var all = latestAppMessages
-
         var used = Set(all.map { $0.dedupeKey })
 
         for message in latestLegacyMessages {
@@ -237,7 +245,9 @@ final class RealtimeFirebaseService {
             }
         }
 
-        return all.sorted { $0.normalizedTime < $1.normalizedTime }
+        return all.sorted {
+            $0.normalizedTime < $1.normalizedTime
+        }
     }
 
     private static func decodeSnapshot<T: Decodable>(_ snapshot: DataSnapshot, as type: T.Type) -> T? {
