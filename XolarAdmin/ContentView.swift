@@ -15,20 +15,23 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            state.startPolling()
             NotificationManager.shared.clearAllDeliveredNotifications()
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active {
                 NotificationManager.shared.clearAllDeliveredNotifications()
-                Task {
-                    await state.refreshAll()
-                }
+                state.startRealtime()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .xolarOpenTicketFromNotification)) { output in
             guard let ticketId = output.userInfo?["ticketId"] as? String else { return }
+
             state.openTicket(ticketId: ticketId)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xolarFCMTokenDidUpdate)) { output in
+            guard let token = output.userInfo?["token"] as? String else { return }
+
+            state.saveFCMToken(token)
         }
     }
 }
