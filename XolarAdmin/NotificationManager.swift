@@ -1,17 +1,48 @@
 import UIKit
 import UserNotifications
+import FirebaseCore
+import FirebaseMessaging
 
 extension Notification.Name {
     static let xolarOpenTicketFromNotification = Notification.Name("xolarOpenTicketFromNotification")
+    static let xolarFCMTokenDidUpdate = Notification.Name("xolarFCMTokenDidUpdate")
 }
 
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+
         UNUserNotificationCenter.current().delegate = self
+        Messaging.messaging().delegate = self
+
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Messaging.messaging().apnsToken = deviceToken
+    }
+
+    func messaging(
+        _ messaging: Messaging,
+        didReceiveRegistrationToken fcmToken: String?
+    ) {
+        guard let fcmToken else { return }
+
+        NotificationCenter.default.post(
+            name: .xolarFCMTokenDidUpdate,
+            object: nil,
+            userInfo: [
+                "token": fcmToken
+            ]
+        )
     }
 
     func userNotificationCenter(
@@ -54,6 +85,26 @@ final class NotificationManager {
             _ = try await UNUserNotificationCenter.current().requestAuthorization(
                 options: [.alert, .sound, .badge]
             )
+
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+
+            Messaging.messaging().token { token, error in
+                if let token {
+                    NotificationCenter.default.post(
+                        name: .xolarFCMTokenDidUpdate,
+                        object: nil,
+                        userInfo: [
+                            "token": token
+                        ]
+                    )
+                }
+
+                if let error {
+                    print("FCM token error: \(error.localizedDescription)")
+                }
+            }
         } catch {
             print("Notification permission error: \(error.localizedDescription)")
         }
