@@ -38,7 +38,7 @@ final class FirebaseRESTClient {
     }
 
     func signIn(email: String, password: String) async throws -> AdminSession {
-        guard !apiKey.contains("AIzaSyClct0l3bgOEiqZMU4iOfHYC0ZuciJwz2o"), !apiKey.isEmpty else {
+        guard !apiKey.isEmpty else {
             throw XolarAPIError.invalidConfig
         }
 
@@ -173,7 +173,7 @@ final class FirebaseRESTClient {
     }
 
     private func dbURL(path: String, session: AdminSession) throws -> URL {
-        guard !databaseURL.contains("xolarsupport"), !databaseURL.isEmpty else {
+        guard !databaseURL.isEmpty else {
             throw XolarAPIError.invalidConfig
         }
 
