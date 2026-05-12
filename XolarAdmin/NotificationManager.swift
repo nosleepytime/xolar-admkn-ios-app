@@ -34,13 +34,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ messaging: Messaging,
         didReceiveRegistrationToken fcmToken: String?
     ) {
-        guard let fcmToken else { return }
+        guard let token = fcmToken else { return }
 
         NotificationCenter.default.post(
             name: .xolarFCMTokenDidUpdate,
             object: nil,
             userInfo: [
-                "token": fcmToken
+                "token": token
             ]
         )
     }
@@ -91,17 +91,17 @@ final class NotificationManager {
             }
 
             Messaging.messaging().token { token, error in
-                if let token {
+                if let realToken = token {
                     NotificationCenter.default.post(
                         name: .xolarFCMTokenDidUpdate,
                         object: nil,
                         userInfo: [
-                            "token": token
+                            "token": realToken
                         ]
                     )
                 }
 
-                if let error {
+                if let error = error {
                     print("FCM token error: \(error.localizedDescription)")
                 }
             }
