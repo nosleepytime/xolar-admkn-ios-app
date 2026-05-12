@@ -9,6 +9,5 @@ enum AppConfig {
 
     static let supportBackendURL = "https://xolarsupporre.vercel.app"
 
-    static let pollNanoseconds: UInt64 = 4_000_000_000
     static let maxLocalNotifications = 50
 }
