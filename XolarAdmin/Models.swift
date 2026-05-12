@@ -12,14 +12,6 @@ struct AdminSession: Codable, Equatable {
     }
 }
 
-struct FirebaseAuthResponse: Decodable {
-    let idToken: String
-    let email: String
-    let refreshToken: String
-    let expiresIn: String
-    let localId: String
-}
-
 struct FirebasePostResponse: Decodable {
     let name: String
 }
@@ -171,6 +163,15 @@ struct TicketMessage: Identifiable, Hashable, Codable {
         self.text = legacy.deleted == true ? "[deleted]" : (legacy.text ?? "")
         self.createdAt = legacy.createdAt ?? 0
     }
+
+    var normalizedTime: Double {
+        createdAt > 9_999_999_999 ? createdAt / 1000 : createdAt
+    }
+
+    var dedupeKey: String {
+        let rounded = Int(normalizedTime)
+        return "\(senderType.lowercased())|\(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(rounded)"
+    }
 }
 
 struct AgentNotificationPayload: Codable {
@@ -200,7 +201,7 @@ struct AgentNotification: Identifiable, Hashable, Codable {
         self.body = payload.body ?? "New activity"
         self.ticketId = payload.ticketId ?? ""
         self.targetAgentId = payload.targetAgentId ?? ""
-        self.createdAt = payload.createdAt ?? Date().timeIntervalSince1970
+        self.createdAt = payload.createdAt ?? Date().timeIntervalSince1970 * 1000
         self.read = payload.read ?? false
     }
 }
@@ -228,11 +229,14 @@ struct Agent: Identifiable, Hashable {
 }
 
 extension Double {
+    var normalizedTimestamp: Double {
+        self > 9_999_999_999 ? self / 1000 : self
+    }
+
     var xolarDateText: String {
         guard self > 0 else { return "Unknown" }
 
-        let timestamp = self > 9_999_999_999 ? self / 1000 : self
-        let date = Date(timeIntervalSince1970: timestamp)
+        let date = Date(timeIntervalSince1970: normalizedTimestamp)
 
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
