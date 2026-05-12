@@ -65,9 +65,11 @@ struct TicketDetailView: View {
             }
         }
         .task {
-            await state.markNotificationsForTicketAsRead(ticketId: ticketId)
-            await state.loadMessages(ticketId: ticketId)
-        }
+    await state.activateTicket(ticketId: ticketId)
+}
+.onDisappear {
+    state.stopActiveTicketRealtime()
+}
         .alert("Close Ticket", isPresented: $showCloseAlert) {
             TextField("Reason", text: $closeReason)
 
