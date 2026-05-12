@@ -38,7 +38,7 @@ final class FirebaseRESTClient {
     }
 
     func signIn(email: String, password: String) async throws -> AdminSession {
-        guard !apiKey.contains("MGoJ-8117T3o-fZcA-jOsa0K-DOD3Pvg"), !apiKey.isEmpty else {
+        guard !apiKey.contains("AIzaSyClct0l3bgOEiqZMU4iOfHYC0ZuciJwz2o"), !apiKey.isEmpty else {
             throw XolarAPIError.invalidConfig
         }
 
