@@ -38,14 +38,12 @@ targets:
       - package: Firebase
         product: FirebaseMessaging
     settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.xolar.admin
-        INFOPLIST_FILE: XolarAdmin/Info.plist
-        CODE_SIGNING_ALLOWED: NO
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGN_IDENTITY: ""
-        CODE_SIGN_ENTITLEMENTS: XolarAdmin/XolarAdmin.entitlements
-
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.xolar.admin
+    INFOPLIST_FILE: XolarAdmin/Info.plist
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ""
 schemes:
   XolarAdmin:
     build:
