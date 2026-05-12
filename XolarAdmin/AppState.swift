@@ -12,14 +12,28 @@ final class AppState: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let client = FirebaseRESTClient()
-    private var pollingTask: Task<Void, Never>?
-    private let sessionKey = "xolar.admin.session"
+    private let realtime = RealtimeFirebaseService()
+    private let backend = FirebaseRESTClient()
     private let notificationsKey = "xolar.admin.local.notifications"
 
     init() {
-        loadSession()
         loadLocalNotifications()
+
+        Task {
+            await restoreSession()
+        }
+    }
+
+    func restoreSession() async {
+        do {
+            if let restored = try await realtime.currentSession() {
+                session = restored
+                await NotificationManager.shared.requestPermission()
+                startRealtime()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func login(email: String, password: String) async {
@@ -27,12 +41,11 @@ final class AppState: ObservableObject {
         errorMessage = nil
 
         do {
-            let newSession = try await client.signIn(email: email, password: password)
+            let newSession = try await realtime.signIn(email: email, password: password)
             session = newSession
-            saveSession(newSession)
+
             await NotificationManager.shared.requestPermission()
-            startPolling()
-            await refreshAll()
+            startRealtime()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -41,111 +54,113 @@ final class AppState: ObservableObject {
     }
 
     func logout() {
-        pollingTask?.cancel()
-        pollingTask = nil
+        do {
+            try realtime.signOut()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
         session = nil
         tickets = []
         agents = []
         messages = [:]
         localNotifications = []
-        UserDefaults.standard.removeObject(forKey: sessionKey)
+
         UserDefaults.standard.removeObject(forKey: notificationsKey)
         NotificationManager.shared.clearAllDeliveredNotifications()
     }
 
     func startPolling() {
-        guard pollingTask == nil else { return }
-        guard session != nil else { return }
+        startRealtime()
+    }
 
-        pollingTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refreshAll()
-                try? await Task.sleep(nanoseconds: AppConfig.pollNanoseconds)
+    func startRealtime() {
+        guard let session else { return }
+
+        realtime.observeTickets { [weak self] tickets in
+            self?.tickets = tickets
+        }
+
+        realtime.observeAgents { [weak self] agents in
+            self?.agents = agents
+        }
+
+        realtime.observeNotifications(uid: session.uid) { [weak self] notifications in
+            guard let self else { return }
+
+            for notification in notifications {
+                let inserted = self.addLocalNotificationIfNeeded(notification)
+
+                if inserted {
+                    NotificationManager.shared.sendLocalNotification(notification)
+                }
             }
         }
     }
 
     func refreshAll() async {
-        guard let session else { return }
+        startRealtime()
+    }
+
+    func activateTicket(ticketId: String) async {
+        guard !ticketId.isEmpty else { return }
+
+        realtime.observeMessages(ticketId: ticketId) { [weak self] newMessages in
+            self?.messages[ticketId] = newMessages
+        }
+
+        await markNotificationsForTicketAsRead(ticketId: ticketId)
 
         do {
-            let newTickets = try await client.fetchTickets(session: session)
-            let newAgents = try await client.fetchAgents(session: session)
-            let remoteNotifications = try await client.fetchAgentNotifications(uid: session.uid, session: session)
-
-            tickets = newTickets
-            agents = newAgents
-
-            for notification in remoteNotifications {
-                let inserted = addLocalNotificationIfNeeded(notification)
-                if inserted {
-                    NotificationManager.shared.sendLocalNotification(notification)
-                }
-            }
+            let fresh = try await freshSession()
+            try await backend.markTicketRead(ticketId: ticketId, idToken: fresh.idToken)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func loadMessages(ticketId: String) async {
-        guard let session else { return }
+    func stopActiveTicketRealtime() {
+        realtime.detachMessages()
+    }
 
-        do {
-            let newMessages = try await client.fetchMessages(ticketId: ticketId, session: session)
-            messages[ticketId] = newMessages
-            try? await client.markTicketRead(ticketId: ticketId, session: session)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    func loadMessages(ticketId: String) async {
+        await activateTicket(ticketId: ticketId)
     }
 
     func sendReply(ticketId: String, text: String) async {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
-        guard let session else { return }
 
         do {
-            try await client.sendAgentMessage(ticketId: ticketId, text: clean, session: session)
-            await loadMessages(ticketId: ticketId)
-            await refreshAll()
+            let fresh = try await freshSession()
+            try await backend.sendAgentMessage(ticketId: ticketId, text: clean, idToken: fresh.idToken)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     func joinTicket(ticketId: String) async {
-        guard let session else { return }
-
         do {
-            try await client.joinTicket(ticketId: ticketId, session: session)
-            await refreshAll()
+            let fresh = try await freshSession()
+            try await backend.joinTicket(ticketId: ticketId, idToken: fresh.idToken)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     func closeTicket(ticketId: String, reason: String) async {
-        guard let session else { return }
-
         do {
-            try await client.closeTicket(ticketId: ticketId, reason: reason, session: session)
-            await refreshAll()
+            let fresh = try await freshSession()
+            try await backend.closeTicket(ticketId: ticketId, reason: reason, idToken: fresh.idToken)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     func transferTicket(ticketId: String, targetAgentId: String, targetAgentEmail: String) async {
-        guard let session else { return }
-
         do {
-            try await client.transferTicket(
-                ticketId: ticketId,
-                targetAgentId: targetAgentId,
-                targetAgentEmail: targetAgentEmail,
-                session: session
-            )
-            await refreshAll()
+            let fresh = try await freshSession()
+            try await backend.transferTicket(ticketId: ticketId, targetAgentId: targetAgentId, idToken: fresh.idToken)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -159,8 +174,7 @@ final class AppState: ObservableObject {
         }
 
         Task {
-            await markNotificationsForTicketAsRead(ticketId: ticketId)
-            await loadMessages(ticketId: ticketId)
+            await activateTicket(ticketId: ticketId)
         }
     }
 
@@ -170,15 +184,7 @@ final class AppState: ObservableObject {
 
         guard let session else { return }
 
-        do {
-            try await client.deleteNotification(
-                notificationId: notification.id,
-                uid: session.uid,
-                session: session
-            )
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        realtime.markNotificationRead(uid: session.uid, notificationId: notification.id)
     }
 
     func markNotificationsForTicketAsRead(ticketId: String) async {
@@ -197,6 +203,21 @@ final class AppState: ObservableObject {
         }
 
         NotificationManager.shared.clearAllDeliveredNotifications()
+    }
+
+    func saveFCMToken(_ token: String) {
+        guard let session else { return }
+
+        realtime.saveFCMToken(uid: session.uid, token: token)
+    }
+
+    private func freshSession() async throws -> AdminSession {
+        guard let fresh = try await realtime.currentSession() else {
+            throw XolarAPIError.loginFailed("Session expired. Please sign in again.")
+        }
+
+        session = fresh
+        return fresh
     }
 
     private func addLocalNotificationIfNeeded(_ notification: AgentNotification) -> Bool {
@@ -218,24 +239,6 @@ final class AppState: ObservableObject {
         saveLocalNotifications()
     }
 
-    private func saveSession(_ session: AdminSession) {
-        if let data = try? JSONEncoder().encode(session) {
-            UserDefaults.standard.set(data, forKey: sessionKey)
-        }
-    }
-
-    private func loadSession() {
-        guard let data = UserDefaults.standard.data(forKey: sessionKey) else { return }
-        guard let saved = try? JSONDecoder().decode(AdminSession.self, from: data) else { return }
-
-        if saved.isExpired {
-            UserDefaults.standard.removeObject(forKey: sessionKey)
-        } else {
-            session = saved
-            startPolling()
-        }
-    }
-
     private func saveLocalNotifications() {
         if let data = try? JSONEncoder().encode(localNotifications) {
             UserDefaults.standard.set(data, forKey: notificationsKey)
@@ -245,6 +248,7 @@ final class AppState: ObservableObject {
     private func loadLocalNotifications() {
         guard let data = UserDefaults.standard.data(forKey: notificationsKey) else { return }
         guard let saved = try? JSONDecoder().decode([AgentNotification].self, from: data) else { return }
+
         localNotifications = saved
     }
 }
